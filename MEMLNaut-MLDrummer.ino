@@ -10,7 +10,7 @@
 #include "src/memllib/synth/maxiPAF.hpp"
 #include "hardware/structs/bus_ctrl.h"
 #include "sharedMem.hpp"
-#include "src/memllib/examples/XiasriAudioApp.hpp"
+#include "src/memllib/examples/MLDrummer.hpp"
 #include "src/memlp/Utils.h"
 
 
@@ -42,7 +42,7 @@ std::shared_ptr<InterfaceRL> APP_SRAM RLInterface;
 std::shared_ptr<MIDIInOut> midi_interf;
 
 
-std::shared_ptr<PAFSynthApp> __scratch_y("audio") audio_app;
+std::shared_ptr<MLDrummer> __scratch_y("audio") audio_app;
 
 // Inter-core communication
 volatile bool APP_SRAM core_0_ready = false;
@@ -85,7 +85,7 @@ void setup()
     pinMode(33, OUTPUT);
     {
         auto temp_interface = std::make_shared<InterfaceRL>();
-        temp_interface->setup(kN_InputParams, PAFSynthApp::kN_Params);
+        temp_interface->setup(kN_InputParams, MLDrummer::kN_Params);
         MEMORY_BARRIER();
         RLInterface = temp_interface;
         MEMORY_BARRIER();
@@ -153,7 +153,7 @@ void setup1()
 
     // Create audio app with memory barrier protection
     {
-        auto temp_audio_app = std::make_shared<PAFSynthApp>();
+        auto temp_audio_app = std::make_shared<MLDrummer>();
         std::shared_ptr<InterfaceBase> selectedInterface;
 
         selectedInterface = std::dynamic_pointer_cast<InterfaceBase>(RLInterface);
