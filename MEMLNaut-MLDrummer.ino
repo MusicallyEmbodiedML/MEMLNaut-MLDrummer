@@ -11,6 +11,7 @@
 #include "hardware/structs/bus_ctrl.h"
 #include "sharedMem.hpp"
 #include "src/memllib/examples/XiasriAudioApp.hpp"
+#include "src/memlp/Utils.h"
 
 
 #define APP_SRAM __not_in_flash("app")
@@ -83,7 +84,7 @@ void setup()
     MEMLNaut::Initialize();
     pinMode(33, OUTPUT);
     {
-        auto temp_interface = std::make_shared<interfaceRL>();
+        auto temp_interface = std::make_shared<InterfaceRL>();
         temp_interface->setup(kN_InputParams, PAFSynthApp::kN_Params);
         MEMORY_BARRIER();
         RLInterface = temp_interface;
@@ -155,11 +156,7 @@ void setup1()
         auto temp_audio_app = std::make_shared<PAFSynthApp>();
         std::shared_ptr<InterfaceBase> selectedInterface;
 
-        if (mlMode == IML) {
-            selectedInterface = std::dynamic_pointer_cast<InterfaceBase>(interfaceIML);
-        } else {
-            selectedInterface = std::dynamic_pointer_cast<InterfaceBase>(RLInterface);
-        }
+        selectedInterface = std::dynamic_pointer_cast<InterfaceBase>(RLInterface);
 
         temp_audio_app->Setup(AudioDriver::GetSampleRate(), selectedInterface);
         // temp_audio_app->Setup(AudioDriver::GetSampleRate(), dynamic_cast<std::shared_ptr<InterfaceBase>> (mlMode == IML ? interfaceIML : RLInterface));
@@ -187,11 +184,3 @@ void loop1()
     delay(1);
 }
 
-extern "C" int getentropy (void * buffer, size_t how_many) {
-    uint8_t* pBuf = (uint8_t*) buffer;
-    while(how_many--) {
-        uint8_t rand_val = rp2040.hwrand32() % UINT8_MAX;
-        *pBuf++ = rand_val;
-    }
-    return 0; // return "no error". Can also do EFAULT, EIO, ENOSYS
-}
