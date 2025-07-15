@@ -1,5 +1,5 @@
 // #include "src/memllib/interface/InterfaceBase.hpp"
-#include "src/memllib/utils/MIDIInOut.hpp"
+#include "src/memllib/interface/MIDIInOut.hpp"
 #include "src/memllib/hardware/memlnaut/display.hpp"
 #include "src/memllib/audio/AudioAppBase.hpp"
 #include "src/memllib/audio/AudioDriver.hpp"
