@@ -32,3 +32,5 @@
 *.app
 
 .ai
+ai.md
+download_log.txt
