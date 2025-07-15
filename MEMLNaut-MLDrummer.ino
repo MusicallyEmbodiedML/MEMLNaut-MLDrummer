@@ -40,7 +40,7 @@ uint32_t get_rosc_entropy_seed(int bits) {
 std::shared_ptr<InterfaceRL> APP_SRAM RLInterface;
 
 std::shared_ptr<MIDIInOut> midi_interf;
-
+std::shared_ptr<display> scr_ptr;
 
 std::shared_ptr<MLDrummer> __scratch_y("audio") audio_app;
 
@@ -57,7 +57,7 @@ constexpr size_t kN_InputParams = 0;
 
 struct repeating_timer APP_SRAM timerDisplay;
 inline bool __not_in_flash_func(displayUpdate)(__unused struct repeating_timer *t) {
-    scr.update();
+    scr_ptr->update();
     return true;
 }
 
@@ -68,7 +68,8 @@ void setup()
     // fprintf(fp, "Hello!\n");
     // fclose(fp);
 
-    scr.setup();
+    scr_ptr = std::make_shared<display>();
+    scr_ptr->setup();
     bus_ctrl_hw->priority = BUSCTRL_BUS_PRIORITY_DMA_W_BITS |
         BUSCTRL_BUS_PRIORITY_DMA_R_BITS | BUSCTRL_BUS_PRIORITY_PROC1_BITS;
 
@@ -76,7 +77,7 @@ void setup()
     srand(seed);
 
     Serial.begin(115200);
-    while (!Serial) {}
+    //while (!Serial) {}
     Serial.println("Serial initialised.");
     WRITE_VOLATILE(serial_ready, true);
 
@@ -85,7 +86,11 @@ void setup()
     pinMode(33, OUTPUT);
     {
         auto temp_interface = std::make_shared<InterfaceRL>();
+<<<<<<< HEAD
         temp_interface->setup(kN_InputParams, MLDrummer::kN_Params);
+=======
+        temp_interface->setup(kN_InputParams, PAFSynthApp::kN_Params, scr_ptr);
+>>>>>>> 01abbabe846a3c6c4e7a8349627625eaada79ef8
         MEMORY_BARRIER();
         RLInterface = temp_interface;
         MEMORY_BARRIER();
@@ -110,7 +115,7 @@ void setup()
         delay(1);
     }
 
-    scr.post("MEMLNaut: let's go!");
+    scr_ptr->post("-- MLDrummer CARL --");
     add_repeating_timer_ms(-39, displayUpdate, NULL, &timerDisplay);
 
     Serial.println("Finished initialising core 0.");
