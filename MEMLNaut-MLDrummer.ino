@@ -86,11 +86,7 @@ void setup()
     pinMode(33, OUTPUT);
     {
         auto temp_interface = std::make_shared<InterfaceRL>();
-<<<<<<< HEAD
-        temp_interface->setup(kN_InputParams, MLDrummer::kN_Params);
-=======
-        temp_interface->setup(kN_InputParams, PAFSynthApp::kN_Params, scr_ptr);
->>>>>>> 01abbabe846a3c6c4e7a8349627625eaada79ef8
+        temp_interface->setup(kN_InputParams, MLDrummer::kN_Params, scr_ptr);
         MEMORY_BARRIER();
         RLInterface = temp_interface;
         MEMORY_BARRIER();
