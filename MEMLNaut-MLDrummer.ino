@@ -16,6 +16,8 @@
 
 #define APP_SRAM __not_in_flash("app")
 
+static constexpr char APP_NAME[] = "-- MLDrummer Betty --";
+
 display APP_SRAM scr;
 
 bool core1_disable_systick = true;
@@ -111,7 +113,7 @@ void setup()
         delay(1);
     }
 
-    scr_ptr->post("-- MLDrummer CARL --");
+    scr_ptr->post(APP_NAME);
     add_repeating_timer_ms(-39, displayUpdate, NULL, &timerDisplay);
 
     Serial.println("Finished initialising core 0.");
