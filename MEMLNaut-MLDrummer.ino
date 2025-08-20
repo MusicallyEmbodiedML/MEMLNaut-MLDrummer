@@ -11,6 +11,7 @@
 #include "hardware/structs/bus_ctrl.h"
 #include "sharedMem.hpp"
 #include "src/memllib/examples/MLDrummer.hpp"
+#include "src/memllib/synth/SaxAnalysis.hpp"
 #include "src/memlp/Utils.h"
 
 
@@ -37,7 +38,6 @@ uint32_t get_rosc_entropy_seed(int bits) {
 }
 
 
-
 // Global objects
 std::shared_ptr<InterfaceRL> APP_SRAM RLInterface;
 
@@ -45,6 +45,7 @@ std::shared_ptr<MIDIInOut> midi_interf;
 std::shared_ptr<display> scr_ptr;
 
 std::shared_ptr<MLDrummer> __scratch_y("audio") audio_app;
+SharedBuffer<float, SaxAnalysis::kN_Params> machine_list_buffer;
 
 // Inter-core communication
 volatile bool APP_SRAM core_0_ready = false;
@@ -53,8 +54,8 @@ volatile bool APP_SRAM serial_ready = false;
 volatile bool APP_SRAM interface_ready = false;
 
 
-// We're only bound to the joystick inputs (x, y, rotate)
-constexpr size_t kN_InputParams = 0;
+// Bind inputs to SaxAnalysis machine listening
+constexpr size_t kN_InputParams = SaxAnalysis::kN_Params;
 
 
 struct repeating_timer APP_SRAM timerDisplay;
@@ -121,15 +122,15 @@ void setup()
 
 void loop()
 {
+    static size_t last_time_1s = 0;
+    static size_t last_time_20ms = 0;
+    static size_t last_time_1ms = 0;
+    size_t current_time_ms = millis();
 
+    // Tasks to run every 1000ms
+    if (current_time_ms - last_time_1s >= 1000) {
+        last_time_1s = current_time_ms;
 
-    MEMLNaut::Instance()->loop();
-    if (midi_interf) {
-        midi_interf->Poll();
-    }
-    static int AUDIO_MEM blip_counter = 0;
-    if (blip_counter++ > 30) {
-        blip_counter = 0;
         Serial.println(".");
         // Blink LED
         digitalWrite(33, HIGH);
@@ -137,8 +138,33 @@ void loop()
         // Un-blink LED
         digitalWrite(33, LOW);
     }
-    RLInterface->readAnalysisParameters();
-    delay(20); // Add a small delay to avoid flooding the serial output
+
+    // tasks to run every 20ms
+    if (current_time_ms - last_time_20ms >= 20) {
+        last_time_20ms = current_time_ms;
+
+        MEMLNaut::Instance()->loop();
+
+        // Read SharedBuffer
+        std::vector<float> mlist_params(SaxAnalysis::kN_Params, 0);
+        machine_list_buffer.readNonBlocking(mlist_params);
+        for (unsigned int n = 0; n < SaxAnalysis::kN_Params; ++n) {
+            if (scr_ptr) {
+                scr_ptr->statusPost(String(mlist_params[n], 4), n);
+            }
+        }
+        // Send parameters to RL interface
+        RLInterface->readAnalysisParameters(mlist_params);
+    }
+
+    // tasks to run every 1ms
+    if (current_time_ms - last_time_1ms >= 1) {
+        last_time_1ms = current_time_ms;
+        // Poll MIDI interface
+        if (midi_interf) {
+            midi_interf->Poll();
+        }
+    }
 }
 
 void setup1()
@@ -161,7 +187,7 @@ void setup1()
 
         selectedInterface = std::dynamic_pointer_cast<InterfaceBase>(RLInterface);
 
-        temp_audio_app->Setup(AudioDriver::GetSampleRate(), selectedInterface);
+        temp_audio_app->Setup(AudioDriver::GetSampleRate(), selectedInterface, &machine_list_buffer);
         // temp_audio_app->Setup(AudioDriver::GetSampleRate(), dynamic_cast<std::shared_ptr<InterfaceBase>> (mlMode == IML ? interfaceIML : RLInterface));
         MEMORY_BARRIER();
         audio_app = temp_audio_app;
