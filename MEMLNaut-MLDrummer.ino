@@ -5,11 +5,20 @@
 #include "src/memllib/audio/AudioDriver.hpp"
 #include "src/memllib/hardware/memlnaut/MEMLNaut.hpp"
 #include <memory>
+
 #define XIASRI 1
+#define USE_POPR    1
+
+#if USE_POPR
+#include "src/memllib/examples/IMLInterface.hpp"
+#define INTERFACE_TYPE IMLInterface
+#else
 #include "src/memllib/examples/InterfaceRL.hpp"
+#define INTERFACE_TYPE InterfaceRL
+#endif
 #include "src/memllib/synth/maxiPAF.hpp"
 #include "hardware/structs/bus_ctrl.h"
-#include "sharedMem.hpp"
+#include "src/memllib/utils/sharedMem.hpp"
 #include "src/memllib/examples/MLDrummer.hpp"
 #include "src/memllib/synth/SaxAnalysis.hpp"
 #include "src/memlp/Utils.h"
@@ -39,12 +48,13 @@ uint32_t get_rosc_entropy_seed(int bits) {
 
 
 // Global objects
-std::shared_ptr<InterfaceRL> APP_SRAM RLInterface;
+std::shared_ptr<INTERFACE_TYPE> APP_SRAM interface;
 
 std::shared_ptr<MIDIInOut> midi_interf;
 std::shared_ptr<display> scr_ptr;
 
 std::shared_ptr<MLDrummer> __scratch_y("audio") audio_app;
+std::unique_ptr<SaxAnalysis> saxAnalysis;
 SharedBuffer<float, SaxAnalysis::kN_Params> machine_list_buffer;
 
 // Inter-core communication
@@ -88,16 +98,16 @@ void setup()
     MEMLNaut::Initialize();
     pinMode(33, OUTPUT);
     {
-        auto temp_interface = std::make_shared<InterfaceRL>();
+        auto temp_interface = std::make_shared<INTERFACE_TYPE>();
         temp_interface->setup(kN_InputParams, MLDrummer::kN_Params, scr_ptr);
         MEMORY_BARRIER();
-        RLInterface = temp_interface;
+        interface = temp_interface;
         MEMORY_BARRIER();
     }
     // Setup interface with memory barrier protection
     WRITE_VOLATILE(interface_ready, true);
     // Bind interface after ensuring it's fully initialized
-    RLInterface->bindInterface(true);
+    interface->bindInterface(true);
     Serial.println("Bound RL interface to MEMLNaut.");
 
     midi_interf = std::make_shared<MIDIInOut>();
@@ -106,7 +116,7 @@ void setup()
     Serial.println("MIDI setup complete.");
 
     // Bind MIDI
-    RLInterface->bindMIDI(midi_interf);
+    interface->bindMIDI(midi_interf);
 
     WRITE_VOLATILE(core_0_ready, true);
     while (!READ_VOLATILE(core_1_ready)) {
@@ -143,8 +153,6 @@ void loop()
     if (current_time_ms - last_time_20ms >= 20) {
         last_time_20ms = current_time_ms;
 
-        MEMLNaut::Instance()->loop();
-
         // Read SharedBuffer
         std::vector<float> mlist_params(SaxAnalysis::kN_Params, 0);
         machine_list_buffer.readNonBlocking(mlist_params);
@@ -154,7 +162,10 @@ void loop()
             }
         }
         // Send parameters to RL interface
-        RLInterface->readAnalysisParameters(mlist_params);
+        interface->readAnalysisParameters(mlist_params);
+
+        // Read pots and run inference loop
+        MEMLNaut::Instance()->loop();
     }
 
     // tasks to run every 1ms
@@ -165,6 +176,36 @@ void loop()
             midi_interf->Poll();
         }
     }
+}
+
+stereosample_t AUDIO_FUNC(audio_callback)(stereosample_t x)
+{
+    stereosample_t y;
+    // Audio processing
+    if (audio_app) {
+        y = audio_app->Process(x);
+    } else {
+        y = x; // Pass through if audio_app is not ready
+    }
+
+    // Machine listening
+    union {
+        SaxAnalysis::parameters_t p;
+        float v[SaxAnalysis::kN_Params];
+    } param_u;
+    param_u.p = saxAnalysis->Process(x.L + x.R);
+    //WRITE_VOLATILE_STRUCT(sharedMem::saxParams, params);
+    // Write params into shared_buffer
+    machine_list_buffer.writeNonBlocking(param_u.v, SaxAnalysis::kN_Params);
+
+    static size_t counter = 0;
+    counter++;
+    if (counter >= AudioDriver::GetSampleRate()) {
+        counter = 0;
+        Serial.println("+");
+    }
+
+    return y;
 }
 
 void setup1()
@@ -179,20 +220,23 @@ void setup1()
         delay(1);
     }
 
+    saxAnalysis = std::make_unique<SaxAnalysis>(AudioDriver::GetSampleRate());
 
     // Create audio app with memory barrier protection
     {
         auto temp_audio_app = std::make_shared<MLDrummer>();
         std::shared_ptr<InterfaceBase> selectedInterface;
 
-        selectedInterface = std::dynamic_pointer_cast<InterfaceBase>(RLInterface);
+        selectedInterface = std::dynamic_pointer_cast<InterfaceBase>(interface);
 
-        temp_audio_app->Setup(AudioDriver::GetSampleRate(), selectedInterface, &machine_list_buffer);
-        // temp_audio_app->Setup(AudioDriver::GetSampleRate(), dynamic_cast<std::shared_ptr<InterfaceBase>> (mlMode == IML ? interfaceIML : RLInterface));
+        temp_audio_app->Setup(AudioDriver::GetSampleRate(), selectedInterface);
         MEMORY_BARRIER();
         audio_app = temp_audio_app;
         MEMORY_BARRIER();
     }
+
+    // Override audio callback
+    AudioDriver::SetCallback(audio_callback);
 
     // Start audio driver
     AudioDriver::Setup();
