@@ -22,6 +22,8 @@
 #include "src/memllib/examples/MLDrummer.hpp"
 #include "src/memllib/synth/SaxAnalysis.hpp"
 #include "src/memlp/Utils.h"
+#include "src/memllib/hardware/memlnaut/Pins.hpp"
+#include "src/memllib/utils/Maths.hpp"
 
 
 #define APP_SRAM __not_in_flash("app")
@@ -53,7 +55,7 @@ std::shared_ptr<INTERFACE_TYPE> APP_SRAM interface;
 std::shared_ptr<MIDIInOut> midi_interf;
 std::shared_ptr<display> scr_ptr;
 
-std::shared_ptr<MLDrummer> __scratch_y("audio") audio_app;
+std::shared_ptr<MLDrummerNew> __scratch_y("audio") audio_app;
 std::unique_ptr<SaxAnalysis> saxAnalysis;
 SharedBuffer<float, SaxAnalysis::kN_Params> machine_list_buffer;
 
@@ -90,16 +92,28 @@ void setup()
     srand(seed);
 
     Serial.begin(115200);
-    //while (!Serial) {}
+    while (!Serial) {}
     Serial.println("Serial initialised.");
     WRITE_VOLATILE(serial_ready, true);
+
+    // Run tests if needed
+    if (Tests::testMedianAbsoluteDeviation()) {
+        Serial.println("___ MAD tests passed. ___");
+    } else {
+        Serial.println("___ MAD TESTS FAILED! ___");
+    }
+    if (Tests::testMeanAbsoluteDeviation()) {
+        Serial.println("___ MeanAD tests passed. ___");
+    } else {
+        Serial.println("___ MeanAD TESTS FAILED! ___");
+    }
 
     // Setup board
     MEMLNaut::Initialize();
     pinMode(33, OUTPUT);
     {
         auto temp_interface = std::make_shared<INTERFACE_TYPE>();
-        temp_interface->setup(kN_InputParams, MLDrummer::kN_Params, scr_ptr);
+        temp_interface->setup(kN_InputParams, MLDrummerNew::kN_Params, scr_ptr);
         MEMORY_BARRIER();
         interface = temp_interface;
         MEMORY_BARRIER();
@@ -137,22 +151,20 @@ void loop()
     static size_t last_time_1ms = 0;
     size_t current_time_ms = millis();
 
-    // Tasks to run every 1000ms
-    if (current_time_ms - last_time_1s >= 1000) {
-        last_time_1s = current_time_ms;
-
-        Serial.println(".");
-        // Blink LED
-        digitalWrite(33, HIGH);
-    } else {
-        // Un-blink LED
-        digitalWrite(33, LOW);
+    // tasks to run every 1ms
+    if (current_time_ms - last_time_1ms >= 1) {
+        last_time_1ms = current_time_ms;
+        // Poll MIDI interface
+        if (midi_interf) {
+            midi_interf->Poll();
+        }
     }
 
     // tasks to run every 20ms
     if (current_time_ms - last_time_20ms >= 20) {
         last_time_20ms = current_time_ms;
 
+#if 1
         // Read SharedBuffer
         std::vector<float> mlist_params(SaxAnalysis::kN_Params, 0);
         machine_list_buffer.readNonBlocking(mlist_params);
@@ -166,20 +178,26 @@ void loop()
 
         // Read pots and run inference loop
         MEMLNaut::Instance()->loop();
+#endif
+
+        // Un-blink LED
+        digitalWrite(Pins::LED, LOW);
     }
 
-    // tasks to run every 1ms
-    if (current_time_ms - last_time_1ms >= 1) {
-        last_time_1ms = current_time_ms;
-        // Poll MIDI interface
-        if (midi_interf) {
-            midi_interf->Poll();
-        }
+    // Tasks to run every 1000ms
+    if (current_time_ms - last_time_1s >= 1000) {
+        last_time_1s = current_time_ms;
+
+        Serial.println(".");
+        // Blink LED
+        digitalWrite(Pins::LED, HIGH);
     }
 }
 
 stereosample_t AUDIO_FUNC(audio_callback)(stereosample_t x)
 {
+    digitalWrite(Pins::LED_TIMING, HIGH);
+
     stereosample_t y;
     // Audio processing
     if (audio_app) {
@@ -189,6 +207,7 @@ stereosample_t AUDIO_FUNC(audio_callback)(stereosample_t x)
     }
 
     // Machine listening
+#if 1
     union {
         SaxAnalysis::parameters_t p;
         float v[SaxAnalysis::kN_Params];
@@ -197,15 +216,51 @@ stereosample_t AUDIO_FUNC(audio_callback)(stereosample_t x)
     //WRITE_VOLATILE_STRUCT(sharedMem::saxParams, params);
     // Write params into shared_buffer
     machine_list_buffer.writeNonBlocking(param_u.v, SaxAnalysis::kN_Params);
+#endif
 
-    static size_t counter = 0;
-    counter++;
-    if (counter >= AudioDriver::GetSampleRate()) {
-        counter = 0;
-        Serial.println("+");
-    }
+    digitalWrite(Pins::LED_TIMING, LOW);
 
     return y;
+}
+
+void AUDIO_FUNC(audio_block_callback)(float in[][kBufferSize], float out[][kBufferSize], size_t n_channels, size_t n_frames)
+{
+    digitalWrite(Pins::LED_TIMING, HIGH);
+    for (size_t i = 0; i < n_frames; ++i) {
+
+        stereosample_t x {
+            in[0][i],
+            in[1][i]
+        }, y;
+
+        // Audio processing
+        if (audio_app) {
+            y = audio_app->Process(x);
+        } else {
+            y = x; // Pass through if audio_app is not ready
+        }
+
+        // Machine listening
+    #if 1
+        union {
+            SaxAnalysis::parameters_t p;
+            float v[SaxAnalysis::kN_Params];
+        } param_u;
+
+        //digitalWrite(Pins::LED_TIMING, HIGH);
+        param_u.p = saxAnalysis->Process(x.L + x.R);
+        //digitalWrite(Pins::LED_TIMING, LOW);
+
+        //WRITE_VOLATILE_STRUCT(sharedMem::saxParams, params);
+        // Write params into shared_buffer
+        machine_list_buffer.writeNonBlocking(param_u.v, SaxAnalysis::kN_Params);
+    #endif
+
+        out[0][i] = y.L;
+        out[1][i] = y.R;
+    }
+    digitalWrite(Pins::LED_TIMING, LOW);
+
 }
 
 void setup1()
@@ -224,7 +279,7 @@ void setup1()
 
     // Create audio app with memory barrier protection
     {
-        auto temp_audio_app = std::make_shared<MLDrummer>();
+        auto temp_audio_app = std::make_shared<MLDrummerNew>();
         std::shared_ptr<InterfaceBase> selectedInterface;
 
         selectedInterface = std::dynamic_pointer_cast<InterfaceBase>(interface);
@@ -236,7 +291,8 @@ void setup1()
     }
 
     // Override audio callback
-    AudioDriver::SetCallback(audio_callback);
+    //AudioDriver::SetCallback(audio_callback);
+    AudioDriver::SetBlockCallback(audio_block_callback);
 
     // Start audio driver
     AudioDriver::Setup();
