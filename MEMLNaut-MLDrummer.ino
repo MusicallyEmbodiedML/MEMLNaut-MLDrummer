@@ -1,3 +1,10 @@
+// TODO:
+/*
+- Remove striped RAM with pico_set_binary_type( TARGET blocked_ram )
+OR
+- Put audio buffers and classes in unstriped ram (SRAM8, SRAM9)
+*/
+
 // #include "src/memllib/interface/InterfaceBase.hpp"
 #include "src/memllib/interface/MIDIInOut.hpp"
 #include "src/memllib/hardware/memlnaut/display.hpp"
@@ -5,6 +12,7 @@
 #include "src/memllib/audio/AudioDriver.hpp"
 #include "src/memllib/hardware/memlnaut/MEMLNaut.hpp"
 #include <memory>
+#include <new> // for placement new
 
 #define XIASRI 1
 #define USE_POPR    1
@@ -29,6 +37,10 @@
 #define APP_SRAM __not_in_flash("app")
 
 static constexpr char APP_NAME[] = "-- MLDrummer Betty --";
+
+// Statically allocated, properly aligned storage in AUDIO_MEM for objects
+alignas(MLDrummerNew) char AUDIO_MEM audio_app_mem[sizeof(MLDrummerNew)];
+alignas(SaxAnalysis)  char AUDIO_MEM saxAnalysis_mem[sizeof(SaxAnalysis)];
 
 display APP_SRAM scr;
 
@@ -55,8 +67,9 @@ std::shared_ptr<INTERFACE_TYPE> APP_SRAM interface;
 std::shared_ptr<MIDIInOut> midi_interf;
 std::shared_ptr<display> scr_ptr;
 
-std::shared_ptr<MLDrummerNew> __scratch_y("audio") audio_app;
-std::unique_ptr<SaxAnalysis> saxAnalysis;
+std::shared_ptr<MLDrummerNew> AUDIO_MEM audio_app;
+// Initialize with nullptr and a dummy deleter that can be default-constructed
+std::unique_ptr<SaxAnalysis, void(*)(SaxAnalysis*)> AUDIO_MEM saxAnalysis{nullptr, [](SaxAnalysis*){}};
 SharedBuffer<float, SaxAnalysis::kN_Params> machine_list_buffer;
 
 // Inter-core communication
@@ -275,16 +288,25 @@ void setup1()
         delay(1);
     }
 
-    saxAnalysis = std::make_unique<SaxAnalysis>(AudioDriver::GetSampleRate());
-
-    // Create audio app with memory barrier protection
+    // Construct SaxAnalysis in statically allocated buffer using placement-new
     {
-        auto temp_audio_app = std::make_shared<MLDrummerNew>();
-        std::shared_ptr<InterfaceBase> selectedInterface;
+        SaxAnalysis* sax_raw = new (saxAnalysis_mem) SaxAnalysis(AudioDriver::GetSampleRate());
+        // function-pointer deleter that only calls destructor (no free)
+        void (*sax_fp_deleter)(SaxAnalysis*) = [](SaxAnalysis* p) { if (p) p->~SaxAnalysis(); };
+        saxAnalysis = std::unique_ptr<SaxAnalysis, void(*)(SaxAnalysis*)>(sax_raw, sax_fp_deleter);
+    }
 
-        selectedInterface = std::dynamic_pointer_cast<InterfaceBase>(interface);
+    // Create audio app using placement-new into static buffer and custom deleter
+    {
+        MLDrummerNew* audio_raw = new (audio_app_mem) MLDrummerNew();
+        std::shared_ptr<InterfaceBase> selectedInterface = std::dynamic_pointer_cast<InterfaceBase>(interface);
 
-        temp_audio_app->Setup(AudioDriver::GetSampleRate(), selectedInterface);
+        audio_raw->Setup(AudioDriver::GetSampleRate(), selectedInterface);
+
+        // shared_ptr with custom deleter calling only the destructor (control block still allocates)
+        auto audio_deleter = [](MLDrummerNew* p) { if (p) p->~MLDrummerNew(); };
+        std::shared_ptr<MLDrummerNew> temp_audio_app(audio_raw, audio_deleter);
+
         MEMORY_BARRIER();
         audio_app = temp_audio_app;
         MEMORY_BARRIER();
