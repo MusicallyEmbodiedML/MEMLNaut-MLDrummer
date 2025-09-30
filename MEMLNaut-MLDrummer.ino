@@ -7,7 +7,7 @@ OR
 
 // #include "src/memllib/interface/InterfaceBase.hpp"
 #include "src/memllib/interface/MIDIInOut.hpp"
-#include "src/memllib/hardware/memlnaut/display.hpp"
+//#include "src/memllib/hardware/memlnaut/display.hpp"
 #include "src/memllib/audio/AudioAppBase.hpp"
 #include "src/memllib/audio/AudioDriver.hpp"
 #include "src/memllib/hardware/memlnaut/MEMLNaut.hpp"
@@ -15,7 +15,7 @@ OR
 #include <new> // for placement new
 
 #define XIASRI 1
-#define USE_POPR    1
+#define USE_POPR    0
 
 #if USE_POPR
 #include "src/memllib/examples/IMLInterface.hpp"
@@ -27,7 +27,8 @@ OR
 #include "src/memllib/synth/maxiPAF.hpp"
 #include "hardware/structs/bus_ctrl.h"
 #include "src/memllib/utils/sharedMem.hpp"
-#include "src/memllib/examples/MLDrummer.hpp"
+//#include "src/memllib/examples/MLDrummer.hpp"
+#include "src/memllib/examples/KassiaAudioApp.hpp"
 #include "src/memllib/synth/SaxAnalysis.hpp"
 #include "src/memlp/Utils.h"
 #include "src/memllib/hardware/memlnaut/Pins.hpp"
@@ -39,10 +40,10 @@ OR
 static constexpr char APP_NAME[] = "-- MLDrummer Betty --";
 
 // Statically allocated, properly aligned storage in AUDIO_MEM for objects
-alignas(MLDrummerNew) char AUDIO_MEM audio_app_mem[sizeof(MLDrummerNew)];
+alignas(KassiaAudioApp) char AUDIO_MEM audio_app_mem[sizeof(KassiaAudioApp)];
 alignas(SaxAnalysis)  char AUDIO_MEM saxAnalysis_mem[sizeof(SaxAnalysis)];
 
-display APP_SRAM scr;
+//display APP_SRAM scr;
 
 bool core1_disable_systick = true;
 bool core1_separate_stack = true;
@@ -65,9 +66,9 @@ uint32_t get_rosc_entropy_seed(int bits) {
 std::shared_ptr<INTERFACE_TYPE> APP_SRAM interface;
 
 std::shared_ptr<MIDIInOut> midi_interf;
-std::shared_ptr<display> scr_ptr;
+//std::shared_ptr<display> scr_ptr;
 
-std::shared_ptr<MLDrummerNew> AUDIO_MEM audio_app;
+std::shared_ptr<KassiaAudioApp> AUDIO_MEM audio_app;
 // Initialize with nullptr and a dummy deleter that can be default-constructed
 std::unique_ptr<SaxAnalysis, void(*)(SaxAnalysis*)> AUDIO_MEM saxAnalysis{nullptr, [](SaxAnalysis*){}};
 SharedBuffer<float, SaxAnalysis::kN_Params> machine_list_buffer;
@@ -83,12 +84,6 @@ volatile bool APP_SRAM interface_ready = false;
 constexpr size_t kN_InputParams = SaxAnalysis::kN_Params;
 
 
-struct repeating_timer APP_SRAM timerDisplay;
-inline bool __not_in_flash_func(displayUpdate)(__unused struct repeating_timer *t) {
-    scr_ptr->update();
-    return true;
-}
-
 void setup()
 {
 
@@ -96,8 +91,6 @@ void setup()
     // fprintf(fp, "Hello!\n");
     // fclose(fp);
 
-    scr_ptr = std::make_shared<display>();
-    scr_ptr->setup();
     bus_ctrl_hw->priority = BUSCTRL_BUS_PRIORITY_DMA_W_BITS |
         BUSCTRL_BUS_PRIORITY_DMA_R_BITS | BUSCTRL_BUS_PRIORITY_PROC1_BITS;
 
@@ -105,7 +98,7 @@ void setup()
     srand(seed);
 
     Serial.begin(115200);
-    while (!Serial) {}
+    //while (!Serial) {}
     Serial.println("Serial initialised.");
     WRITE_VOLATILE(serial_ready, true);
 
@@ -126,7 +119,7 @@ void setup()
     pinMode(33, OUTPUT);
     {
         auto temp_interface = std::make_shared<INTERFACE_TYPE>();
-        temp_interface->setup(kN_InputParams, MLDrummerNew::kN_Params, scr_ptr);
+        temp_interface->setup(kN_InputParams, KassiaAudioApp::kN_Params);
         MEMORY_BARRIER();
         interface = temp_interface;
         MEMORY_BARRIER();
@@ -135,7 +128,7 @@ void setup()
     WRITE_VOLATILE(interface_ready, true);
     // Bind interface after ensuring it's fully initialized
     interface->bindInterface(true);
-    Serial.println("Bound RL interface to MEMLNaut.");
+    Serial.println("Bound interface to MEMLNaut.");
 
     midi_interf = std::make_shared<MIDIInOut>();
     midi_interf->Setup(4);
@@ -151,8 +144,21 @@ void setup()
         delay(1);
     }
 
-    scr_ptr->post(APP_NAME);
-    add_repeating_timer_ms(-39, displayUpdate, NULL, &timerDisplay);
+    //scr_ptr->post(APP_NAME);
+    //add_repeating_timer_ms(-39, displayUpdate, NULL, &timerDisplay);
+    std::shared_ptr<MessageView> helpView = std::make_shared<MessageView>("Help");
+    helpView->post(APP_NAME);
+    helpView->post("TA: Down: Forget replay memory");
+    helpView->post("MA: Up: Randomise actor");
+    helpView->post("MA: Down: Randomise critic");
+    helpView->post("MB: Up: Positive reward");
+    helpView->post("MB: Down: Negative reward");
+    helpView->post("Y: Optimisation rate");
+    helpView->post("Z: OU noise");
+    helpView->post("Joystick: Explore");
+    MEMLNaut::Instance()->disp->AddView(helpView);
+
+    MEMLNaut::Instance()->addSystemInfoView();
 
     Serial.println("Finished initialising core 0.");
 }
@@ -181,11 +187,6 @@ void loop()
         // Read SharedBuffer
         std::vector<float> mlist_params(SaxAnalysis::kN_Params, 0);
         machine_list_buffer.readNonBlocking(mlist_params);
-        for (unsigned int n = 0; n < SaxAnalysis::kN_Params; ++n) {
-            if (scr_ptr) {
-                scr_ptr->statusPost(String(mlist_params[n], 4), n);
-            }
-        }
         // Send parameters to RL interface
         interface->readAnalysisParameters(mlist_params);
 
@@ -248,7 +249,7 @@ void AUDIO_FUNC(audio_block_callback)(float in[][kBufferSize], float out[][kBuff
 
         // Audio processing
         if (audio_app) {
-            y = audio_app->Process(x);
+            y = x + audio_app->Process(x);
         } else {
             y = x; // Pass through if audio_app is not ready
         }
@@ -298,14 +299,14 @@ void setup1()
 
     // Create audio app using placement-new into static buffer and custom deleter
     {
-        MLDrummerNew* audio_raw = new (audio_app_mem) MLDrummerNew();
+        KassiaAudioApp* audio_raw = new (audio_app_mem) KassiaAudioApp();
         std::shared_ptr<InterfaceBase> selectedInterface = std::dynamic_pointer_cast<InterfaceBase>(interface);
 
         audio_raw->Setup(AudioDriver::GetSampleRate(), selectedInterface);
 
         // shared_ptr with custom deleter calling only the destructor (control block still allocates)
-        auto audio_deleter = [](MLDrummerNew* p) { if (p) p->~MLDrummerNew(); };
-        std::shared_ptr<MLDrummerNew> temp_audio_app(audio_raw, audio_deleter);
+        auto audio_deleter = [](KassiaAudioApp* p) { if (p) p->~KassiaAudioApp(); };
+        std::shared_ptr<KassiaAudioApp> temp_audio_app(audio_raw, audio_deleter);
 
         MEMORY_BARRIER();
         audio_app = temp_audio_app;
