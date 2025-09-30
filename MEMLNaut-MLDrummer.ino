@@ -249,9 +249,11 @@ void AUDIO_FUNC(audio_block_callback)(float in[][kBufferSize], float out[][kBuff
 
         // Audio processing
         if (audio_app) {
-            y = x + audio_app->Process(x);
+            y = audio_app->Process(x);
         } else {
             y = x; // Pass through if audio_app is not ready
+            y.L *= y.L;
+            y.R *= y.R;
         }
 
         // Machine listening
