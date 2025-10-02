@@ -28,7 +28,7 @@ OR
 #include "hardware/structs/bus_ctrl.h"
 #include "src/memllib/utils/sharedMem.hpp"
 //#include "src/memllib/examples/MLDrummer.hpp"
-#include "src/memllib/examples/KassiaAudioApp.hpp"
+#include "src/memllib/examples/BettyAudioApp.hpp"
 #include "src/memllib/synth/SaxAnalysis.hpp"
 #include "src/memlp/Utils.h"
 #include "src/memllib/hardware/memlnaut/Pins.hpp"
@@ -40,7 +40,7 @@ OR
 static constexpr char APP_NAME[] = "-- MLDrummer Betty --";
 
 // Statically allocated, properly aligned storage in AUDIO_MEM for objects
-alignas(KassiaAudioApp) char AUDIO_MEM audio_app_mem[sizeof(KassiaAudioApp)];
+alignas(BettyAudioApp) char AUDIO_MEM audio_app_mem[sizeof(BettyAudioApp)];
 alignas(SaxAnalysis)  char AUDIO_MEM saxAnalysis_mem[sizeof(SaxAnalysis)];
 
 //display APP_SRAM scr;
@@ -68,7 +68,7 @@ std::shared_ptr<INTERFACE_TYPE> APP_SRAM interface;
 std::shared_ptr<MIDIInOut> midi_interf;
 //std::shared_ptr<display> scr_ptr;
 
-std::shared_ptr<KassiaAudioApp> AUDIO_MEM audio_app;
+std::shared_ptr<BettyAudioApp> AUDIO_MEM audio_app;
 // Initialize with nullptr and a dummy deleter that can be default-constructed
 std::unique_ptr<SaxAnalysis, void(*)(SaxAnalysis*)> AUDIO_MEM saxAnalysis{nullptr, [](SaxAnalysis*){}};
 SharedBuffer<float, SaxAnalysis::kN_Params> machine_list_buffer;
@@ -119,7 +119,7 @@ void setup()
     pinMode(33, OUTPUT);
     {
         auto temp_interface = std::make_shared<INTERFACE_TYPE>();
-        temp_interface->setup(kN_InputParams, KassiaAudioApp::kN_Params);
+        temp_interface->setup(kN_InputParams, BettyAudioApp::kN_Params);
         MEMORY_BARRIER();
         interface = temp_interface;
         MEMORY_BARRIER();
@@ -215,7 +215,7 @@ stereosample_t AUDIO_FUNC(audio_callback)(stereosample_t x)
     stereosample_t y;
     // Audio processing
     if (audio_app) {
-        y = audio_app->Process(x);
+        y = audio_app->ProcessInline(x);
     } else {
         y = x; // Pass through if audio_app is not ready
     }
@@ -249,7 +249,7 @@ void AUDIO_FUNC(audio_block_callback)(float in[][kBufferSize], float out[][kBuff
 
         // Audio processing
         if (audio_app) {
-            y = audio_app->Process(x);
+            y = audio_app->ProcessInline(x);
         } else {
             y = x; // Pass through if audio_app is not ready
             y.L *= y.L;
@@ -301,14 +301,14 @@ void setup1()
 
     // Create audio app using placement-new into static buffer and custom deleter
     {
-        KassiaAudioApp* audio_raw = new (audio_app_mem) KassiaAudioApp();
+        BettyAudioApp* audio_raw = new (audio_app_mem) BettyAudioApp();
         std::shared_ptr<InterfaceBase> selectedInterface = std::dynamic_pointer_cast<InterfaceBase>(interface);
 
         audio_raw->Setup(AudioDriver::GetSampleRate(), selectedInterface);
 
         // shared_ptr with custom deleter calling only the destructor (control block still allocates)
-        auto audio_deleter = [](KassiaAudioApp* p) { if (p) p->~KassiaAudioApp(); };
-        std::shared_ptr<KassiaAudioApp> temp_audio_app(audio_raw, audio_deleter);
+        auto audio_deleter = [](BettyAudioApp* p) { if (p) p->~BettyAudioApp(); };
+        std::shared_ptr<BettyAudioApp> temp_audio_app(audio_raw, audio_deleter);
 
         MEMORY_BARRIER();
         audio_app = temp_audio_app;
