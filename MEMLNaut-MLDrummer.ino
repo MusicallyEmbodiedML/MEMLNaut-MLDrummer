@@ -28,7 +28,7 @@ OR
 #include "hardware/structs/bus_ctrl.h"
 #include "src/memllib/utils/sharedMem.hpp"
 //#include "src/memllib/examples/MLDrummer.hpp"
-#include "src/memllib/examples/BettyAudioApp.hpp"
+#include "BettyAudioApp.hpp"
 #include "src/memllib/synth/SaxAnalysis.hpp"
 #include "src/memlp/Utils.h"
 #include "src/memllib/hardware/memlnaut/Pins.hpp"
